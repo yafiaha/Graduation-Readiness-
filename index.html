@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graduation Readiness Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto py-8">
+        <h1 class="text-4xl font-bold text-center mb-8">Graduation Readiness Dashboard</h1>
+
+        <!-- Filter Section -->
+        <div class="flex justify-center mb-8">
+            <select id="schoolFilter" class="border rounded-lg p-2 mr-4">
+                <option value="">Select School</option>
+            </select>
+            <select id="gradeFilter" class="border rounded-lg p-2">
+                <option value="">Select Grade</option>
+            </select>
+        </div>
+
+        <!-- Data Table -->
+        <div class="overflow-x-auto">
+            <table class="table-auto w-full bg-white shadow-md rounded-lg">
+                <thead class="bg-gray-200">
+                    <tr>
+                        <th class="px-4 py-2">Student Name</th>
+                        <th class="px-4 py-2">School</th>
+                        <th class="px-4 py-2">Grade</th>
+                        <th class="px-4 py-2">Credits Earned</th>
+                        <th class="px-4 py-2">Credits Breakdown</th>
+                        <th class="px-4 py-2">At Risk Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="studentTable" class="text-center">
+                    <!-- Data rows will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Graduation requirements by subject
+        const graduationRequirements = {
+            ELA: 4.0,
+            MTH: 4.0,
+            SCI: 4.0,
+            SS: 3.0,
+            LANG: 2.0,
+            ART: 1.0,
+            PE: 1.0
+        };
+
+        // Global variable to store students data
+        let students = [];
+
+        // Load JSON data
+        fetch('mock_data.json')
+            .then(response => response.json())
+            .then(data => {
+                students = data.students;
+                const finalGrades = data.final_grades;
+                const attendance = data.attendance;
+
+                // Calculate credits earned per student
+                const studentCredits = {};
+                finalGrades.forEach(record => {
+                    if (!studentCredits[record.Student_ID]) {
+                        studentCredits[record.Student_ID] = {
+                            total: 0,
+                            subjects: { ELA: 0, MTH: 0, SCI: 0, SS: 0, LANG: 0, ART: 0, PE: 0 }
+                        };
+                    }
+                    const creditType = record.Credit_Type;
+                    if (studentCredits[record.Student_ID].subjects[creditType] !== undefined) {
+                        studentCredits[record.Student_ID].subjects[creditType] += record.Credit_Awarded || 0;
+                        studentCredits[record.Student_ID].total += record.Credit_Awarded || 0;
+                    }
+                });
+
+                // Calculate attendance for each student
+                const studentAttendance = {};
+                attendance.forEach(record => {
+                    if (!studentAttendance[record.Student_ID]) {
+                        studentAttendance[record.Student_ID] = { present: 0, total: 0 };
+                    }
+                    studentAttendance[record.Student_ID].total += 1;
+                    if (record.Code === 'P') { // Assuming 'P' indicates present
+                        studentAttendance[record.Student_ID].present += 1;
+                    }
+                });
+
+                // Add credits and attendance data to each student
+                students.forEach(student => {
+                    const credits = studentCredits[student.ID] || { total: 0, subjects: { ...graduationRequirements, ...{ ELA: 0, MTH: 0, SCI: 0, SS: 0, LANG: 0, ART: 0, PE: 0 } } };
+                    const attendance = studentAttendance[student.ID] || { present: 0, total: 0 };
+
+                    student.Credits_Earned = credits.total;
+                    student.Credits_By_Subject = credits.subjects;
+
+                    // Determine at-risk status and reason
+                    const attendanceRate = attendance.total > 0 ? (attendance.present / attendance.total) : 0;
+                    const missingCredits = Object.entries(credits.subjects).some(([subject, earned]) => earned < graduationRequirements[subject]);
+
+                    student.Flag_AtRisk = attendanceRate < 0.9 || missingCredits; // At risk if attendance < 90% or missing credits
+                    student.AtRiskReason = [];
+                    if (attendanceRate < 0.9) student.AtRiskReason.push('Low attendance');
+                    if (missingCredits) student.AtRiskReason.push('Insufficient credits');
+                });
+
+                // Populate Filters
+                const schoolFilter = document.getElementById('schoolFilter');
+                const gradeFilter = document.getElementById('gradeFilter');
+                const schools = [...new Set(students.map(s => s.School))];
+                const grades = [...new Set(students.map(s => s.Grade))];
+
+                schools.forEach(school => {
+                    const option = document.createElement('option');
+                    option.value = school;
+                    option.textContent = school;
+                    schoolFilter.appendChild(option);
+                });
+
+                grades.forEach(grade => {
+                    const option = document.createElement('option');
+                    option.value = grade;
+                    option.textContent = grade;
+                    gradeFilter.appendChild(option);
+                });
+
+                // Populate the table
+                populateTable(students);
+
+                // Add event listeners to filters
+                document.getElementById('schoolFilter').addEventListener('change', applyFilters);
+                document.getElementById('gradeFilter').addEventListener('change', applyFilters);
+            })
+            .catch(error => {
+                console.error('Error loading JSON data:', error);
+            });
+
+        // Function to populate the table
+        function populateTable(filteredData) {
+            const table = document.getElementById('studentTable');
+            table.innerHTML = ''; // Clear previous data
+            filteredData.forEach(student => {
+                const subjects = student.Credits_By_Subject;
+                const subjectCredits = Object.entries(subjects)
+                    .map(([subject, earned]) => `${subject}: ${earned.toFixed(1)} / ${graduationRequirements[subject]}`)
+                    .join('<br>');
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="border px-4 py-2">${student.First_Name} ${student.Last_Name}</td>
+                    <td class="border px-4 py-2">${student.School}</td>
+                    <td class="border px-4 py-2">${student.Grade}</td>
+                    <td class="border px-4 py-2">${student.Credits_Earned.toFixed(1)}</td>
+                    <td class="border px-4 py-2">${subjectCredits}</td>
+                    <td class="border px-4 py-2">${student.Flag_AtRisk ? student.AtRiskReason.join(', ') : 'N/A'}</td>
+                `;
+                table.appendChild(row);
+            });
+        }
+
+        // Function to apply filters
+        function applyFilters() {
+            const selectedSchool = document.getElementById('schoolFilter').value;
+            const selectedGrade = document.getElementById('gradeFilter').value;
+
+            // Filter the students array based on selected filters
+            const filteredStudents = students.filter(student => {
+                const matchesSchool = !selectedSchool || student.School === selectedSchool;
+                const matchesGrade = !selectedGrade || student.Grade == selectedGrade;
+                return matchesSchool && matchesGrade;
+            });
+
+            // Repopulate the table with filtered data
+            populateTable(filteredStudents);
+        }
+    </script>
+</body>
+</html>
+
+
+
